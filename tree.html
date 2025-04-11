@@ -1,0 +1,320 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Policy Tree Visualization</title>
+  <script src="https://d3js.org/d3.v7.min.js"></script>
+  <style>
+    body {
+      font-family: sans-serif;
+      margin: 0;
+      background-color: black;
+      color: white;
+    }
+    svg {
+      width: 100vw;
+      height: 100vh;
+    }
+    .link {
+      fill: none;
+      stroke: #999;
+      stroke-opacity: 0.6;
+      stroke-width: 1.5px;
+      marker-end: url(#arrow);
+    }
+    .node text {
+      font-size: 12px;
+      pointer-events: all;
+    }
+    .node a {
+      text-decoration: none;
+      fill: black;
+    }
+    #controls {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      background: rgba(0, 0, 0, 0.7);
+      padding: 10px;
+      border-radius: 10px;
+      z-index: 10;
+    }
+    #controls label {
+      display: block;
+      margin-bottom: 4px;
+    }
+  </style>
+</head>
+<body>
+  <div id="controls">
+    <label for="nodeSelector">Focus on ID:</label>
+    <select id="nodeSelector">
+      <option value="">-- None --</option>
+    </select>
+  </div>
+  <svg></svg>
+
+  <script>
+    let originalData = [];
+    let focusedId = null;
+    let nodeById = new Map();
+
+    // Function to update URL without reloading the page
+    function updateUrl(id) {
+      const newUrl = id ? `tree.html?id=${id}` : 'tree.html';
+      window.history.pushState({ path: newUrl }, '', newUrl);
+    }
+
+    d3.json("rules.json").then(function(data) {
+      originalData = data;
+      nodeById = new Map(data.map(d => [d.id, d]));
+
+      const width = window.innerWidth;
+      const height = window.innerHeight;
+
+      const svg = d3.select("svg");
+      const container = svg.append("g");
+
+      svg.call(d3.zoom()
+        .scaleExtent([0.2, 2])
+        .on("zoom", (event) => container.attr("transform", event.transform)))
+        .call(d3.zoom().transform, d3.zoomIdentity.translate(width / 2, height / 2).scale(0.8));
+
+      const allTypes = Array.from(new Set(data.map(d => d.type)));
+      const colorScale = {
+        "Purpose": "gold",
+        "Principle": "orange",
+        "Law": "skyblue",
+        "Right": "lightcoral",
+        "Obligation": "lightpink",
+        "Duty": "lightgray",
+        "Section": "lightgreen"
+      };
+
+      const typeFilter = {};
+      allTypes.forEach(type => typeFilter[type] = true); // show all types initially
+
+      const controls = d3.select("#controls");
+      allTypes.forEach(type => {
+        controls.append("label")
+          .html(`<input type="checkbox" checked data-type="${type}"/> ${type}`);
+      });
+
+      controls.selectAll("input").on("change", function() {
+        typeFilter[this.dataset.type] = this.checked;
+        updateGraph();
+      });
+
+      const selector = d3.select("#nodeSelector");
+      data.forEach(d => {
+        selector.append("option").attr("value", d.id).text(`${d.id}: ${d.name}`);
+      });
+
+      // Get the ID from the URL if present
+      const urlParams = new URLSearchParams(window.location.search);
+      focusedId = urlParams.get("id") ? parseInt(urlParams.get("id")) : null;
+
+      // Update the selector based on the focused ID from the URL
+      if (focusedId) {
+        selector.property("value", focusedId);
+      }
+
+      selector.on("change", function() {
+        focusedId = this.value ? +this.value : null;
+        updateUrl(focusedId); // Update URL
+        updateGraph();
+      });
+
+      // Arrow marker
+      container.append("defs").append("marker")
+        .attr("id", "arrow")
+        .attr("viewBox", "0 -5 10 10")
+        .attr("refX", 18)
+        .attr("refY", 0)
+        .attr("markerWidth", 6)
+        .attr("markerHeight", 6)
+        .attr("orient", "auto")
+        .append("path")
+        .attr("d", "M0,-5L10,0L0,5")
+        .attr("fill", "#999");
+
+      let simulation;
+
+      function updateGraph() {
+        let currentData = [...originalData];
+        let highlightMap = new Map();
+
+        if (focusedId && nodeById.has(focusedId)) {
+          const self = focusedId;
+          const children = getAllChildren(focusedId);
+          const parents = getAllParents(focusedId);
+          const citations = getCitingNodes(focusedId);
+
+          highlightMap.set(self, 'self');
+          children.forEach(id => highlightMap.set(id, 'child'));
+          parents.forEach(id => highlightMap.set(id, 'parent'));
+          citations.forEach(id => highlightMap.set(id, 'cited'));
+
+          const idsToShow = new Set([self, ...children, ...parents, ...citations]);
+          currentData = [...idsToShow].map(id => nodeById.get(id));
+        }
+
+        const filteredNodes = currentData.filter(d => typeFilter[d.type]);
+        const filteredNodeIds = new Set(filteredNodes.map(d => d.id));
+
+        const filteredLinks = [];
+        filteredNodes.forEach(source => {
+          if (Array.isArray(source.links)) {
+            source.links.forEach(targetId => {
+              if (filteredNodeIds.has(targetId)) {
+                filteredLinks.push({ source: source.id, target: targetId });
+              }
+            });
+          }
+        });
+
+        container.selectAll(".link").remove();
+        container.selectAll(".node").remove();
+
+        const nodes = filteredNodes.map(d => ({
+          id: d.id,
+          name: d.name,
+          type: d.type,
+          highlight: highlightMap.get(d.id) || null
+        }));
+        const links = filteredLinks;
+
+        simulation?.stop();
+
+        simulation = d3.forceSimulation(nodes)
+          .force("link", d3.forceLink(links).id(d => d.id).distance(140))
+          .force("charge", d3.forceManyBody().strength(-400))
+          .force("center", d3.forceCenter(0, 0));
+
+        const link = container.append("g")
+          .attr("stroke", "#aaa")
+          .attr("stroke-opacity", 0.6)
+          .selectAll("path")
+          .data(links)
+          .join("path")
+          .attr("class", "link")
+          .attr("marker-end", "url(#arrow)");
+
+        const node = container.append("g")
+          .attr("stroke", "#fff")
+          .attr("stroke-width", 1.5)
+          .selectAll("g")
+          .data(nodes)
+          .join("g")
+          .attr("class", "node")
+          .call(drag(simulation));
+
+        node.append("circle")
+          .attr("r", d => {
+            switch (d.type) {
+              case "Purpose":
+              case "Principle": return 36;
+              case "Law": return 18;
+              case "Section": return 9;
+              case "Right":
+              case "Obligation":
+              case "Duty": return 24;
+              default: return 12;
+            }
+          })
+          .attr("fill", d => {
+            if (d.highlight === 'self') return "#ffffff";
+            if (d.highlight === 'child') return "#ffff99";
+            if (d.highlight === 'parent') return "#99ccff";
+            if (d.highlight === 'cited') return "#66ff66";
+            return colorScale[d.type] || "gray";
+          });
+
+        node.append("a")
+          .attr("xlink:href", d => `tree.html?id=${d.id}`)
+          .append("text")
+          .text(d => `${d.id}: ${d.name}`)
+          .attr("x", 15)
+          .attr("y", 4);
+
+        simulation.on("tick", () => {
+          link.attr("d", d => `M${d.source.x},${d.source.y}L${d.target.x},${d.target.y}`);
+          node.attr("transform", d => `translate(${d.x},${d.y})`);
+        });
+      }
+
+      function drag(simulation) {
+        function dragstarted(event, d) {
+          if (!event.active) simulation.alphaTarget(0.3).restart();
+          d.fx = d.x;
+          d.fy = d.y;
+        }
+        function dragged(event, d) {
+          d.fx = event.x;
+          d.fy = event.y;
+        }
+        function dragended(event, d) {
+          if (!event.active) simulation.alphaTarget(0);
+          d.fx = null;
+          d.fy = null;
+        }
+        return d3.drag()
+          .on("start", dragstarted)
+          .on("drag", dragged)
+          .on("end", dragended);
+      }
+
+      // Function to get all children (recursive)
+      function getAllChildren(startId) {
+        const visited = new Set();
+        const result = [];
+
+        function findChildren(id) {
+          if (visited.has(id)) return;
+          visited.add(id);
+
+          const node = nodeById.get(id);
+          if (node?.links) {
+            for (const childId of node.links) {
+              result.push(childId);
+              findChildren(childId); // Recursively find children's children
+            }
+          }
+        }
+
+        findChildren(startId);
+        return result;
+      }
+
+      // Function to get all parents (recursive)
+      function getAllParents(targetId) {
+        const visited = new Set();
+        const result = [];
+
+        function findParents(id) {
+          if (visited.has(id)) return;
+          visited.add(id);
+
+          const parents = originalData.filter(node => node.links?.includes(id));
+          for (const parent of parents) {
+            result.push(parent.id);
+            findParents(parent.id); // Recursively find parent's parents
+          }
+        }
+
+        findParents(targetId);
+        return result;
+      }
+
+      function getCitingNodes(id) {
+        return originalData
+          .filter(node => node.links?.includes(id))
+          .map(node => node.id)
+          .filter(parentId => parentId !== focusedId);
+      }
+
+      updateGraph();
+    });
+  </script>
+</body>
+</html>

@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Policy Viewer</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="sidebar-left">
+    <button onclick="goBack()">⬅️ Back to all</button>
+    <button id="displayAllBtn" data-state="collapsed">🔓 Display All</button>
+
+    <h3>Filters</h3>
+    <label for="typeFilter">Type:</label>
+    <select id="typeFilter">
+      <option value="all">Show All</option>
+      <option value="Purpose">Purpose</option>
+      <option value="Principle">Principle</option>
+      <option value="Right">Right</option>
+      <option value="Duty">Duty</option>
+      <option value="Obligation">Obligation</option>
+      <option value="Law">Law</option>
+      <option value="Section">Section</option>
+    </select>
+
+    <label for="tagFilter">Tags:</label>
+    <select id="tagFilter">
+      <option value="all">All Tags</option>
+    </select>
+
+    <label for="stakeholderFilter">Stakeholders:</label>
+    <select id="stakeholderFilter" multiple>
+      <option value="all">All Stakeholders</option>
+    </select>
+  </div>
+
+  <div class="main-content">
+    <h1>Policy Viewer</h1>
+    <div id="ruleContainer"></div>
+  </div>
+
+  <div class="sidebar-right" id="infoSidebar">
+    <div id="sidebarContent"></div>
+  </div>
+
+  <script src="script.js"></script>
+</body>
+</html>
